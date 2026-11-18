@@ -1,0 +1,1343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CoffeeBot Machine Status Dashboard</title>
+<link rel="icon" id="favicon" href="data:," />
+<style>
+  :root, [data-theme="dark"] {
+    --bg: #1b1410;
+    --card: #2a201a;
+    --card-border: #3d2f24;
+    --text: #f3e9df;
+    --muted: #b09a86;
+    --accent: #937054;
+    --input-bg: #201812;
+    --green: #2ecc71;
+    --red: #e74c3c;
+    --gold: #f1c40f;
+    --gray: #7f8c8d;
+    --amber: #e59a3c;
+    --orange: #ff6d1f;
+  }
+  [data-theme="light"] {
+    --bg: #f5efe8;
+    --card: #ffffff;
+    --card-border: #e3d7c8;
+    --text: #2e2018;
+    --muted: #8a7663;
+    --accent: #937054;
+    --input-bg: #faf6f1;
+    --green: #219653;
+    --red: #d64541;
+    --gold: #c79100;
+    --gray: #a5adaf;
+    --amber: #b3701a;
+    --orange: #c2410c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Titillium Web", "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    padding: 24px 28px 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    border-bottom: 1px solid var(--card-border);
+  }
+  h1 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: .3px; }
+  h1 .cup { font-size: 26px; margin-right: 8px; }
+  .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .updated { color: var(--muted); font-size: 12px; }
+  label.ctl { color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+
+  /* Toggle switch: a real checkbox laid transparently over the drawn track,
+     so .checked / onchange / keyboard focus all behave normally. */
+  .switch { position: relative; display: inline-block; width: 38px; height: 21px; flex: none; }
+  .switch input {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    margin: 0; padding: 0; opacity: 0; cursor: pointer; z-index: 2;
+  }
+  .switch .slider {
+    position: absolute; inset: 0; border-radius: 999px;
+    background: var(--input-bg); border: 1px solid var(--card-border);
+    transition: background .2s ease, border-color .2s ease;
+  }
+  .switch .slider::before {
+    content: ""; position: absolute; left: 2px; top: 2px; width: 15px; height: 15px;
+    border-radius: 50%; background: var(--muted);
+    transition: transform .2s ease, background .2s ease;
+  }
+  .switch input:checked + .slider { background: var(--accent); border-color: var(--accent); }
+  .switch input:checked + .slider::before { transform: translateX(17px); background: #fff; }
+  .switch input:focus-visible + .slider { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(147,112,84,.45); }
+  body { transition: background .2s ease, color .2s ease; }
+  select, input {
+    background: var(--input-bg); color: var(--text); border: 1px solid var(--card-border);
+    border-radius: 8px; padding: 8px 10px; font-size: 14px; font-family: inherit;
+  }
+  select:focus, input:focus { outline: none; border-color: var(--accent); }
+  button {
+    background: var(--accent); color: #fff; border: none; padding: 9px 16px;
+    border-radius: 8px; font-size: 14px; cursor: pointer; font-weight: 600;
+  }
+  button:hover { filter: brightness(1.1); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.ghost { background: transparent; border: 1px solid var(--card-border); color: var(--muted); }
+
+  /* Add-machine bar */
+  .addbar {
+    display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;
+    padding: 16px 28px 0;
+  }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field span { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .field input { width: 160px; }
+  .field input.serial { width: 130px; letter-spacing: 2px; }
+  .addmsg { font-size: 13px; align-self: center; }
+  .addmsg.err { color: var(--red); }
+  .addmsg.ok  { color: var(--green); }
+
+  .summary { display: flex; gap: 10px; padding: 16px 28px 0; flex-wrap: wrap; }
+  .pill { padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 600;
+          background: var(--card); border: 1px solid var(--card-border); }
+  .pill b { font-size: 15px; }
+  .pill.on   { color: var(--green); }
+  .pill.err  { color: var(--red); }
+
+  .grid {
+    display: grid; gap: 16px; padding: 20px 28px 40px;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  }
+  .empty { padding: 40px 28px; color: var(--muted); }
+  .card {
+    background: var(--card); border: 1px solid var(--card-border);
+    border-radius: 14px; padding: 18px 20px; position: relative; overflow: hidden;
+    transition: transform .12s ease;
+  }
+  .card:hover { transform: translateY(-2px); }
+  .card::before {
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px;
+    background: var(--gray);
+  }
+  .card.online::before { background: var(--green); }
+  .card.error::before  { background: var(--red); }
+  .card.offline::before{ background: var(--red); }
+  .card.loading::before{ background: var(--accent); }
+
+  .remove {
+    position: absolute; top: 12px; right: 12px; width: 26px; height: 26px;
+    border-radius: 50%; background: transparent; border: 1px solid var(--card-border);
+    color: var(--muted); font-size: 15px; line-height: 1; padding: 0; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .remove:hover { background: rgba(231,76,60,.15); color: var(--red); border-color: var(--red); filter: none; }
+
+  .bell {
+    position: absolute; top: 12px; right: 44px; width: 26px; height: 26px;
+    border-radius: 50%; background: transparent; border: 1px solid var(--card-border);
+    color: var(--muted); font-size: 13px; line-height: 1; padding: 0; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    filter: grayscale(1); opacity: .55;
+  }
+  .bell:hover { border-color: var(--gold); opacity: 1; filter: none; }
+  .bell.on {
+    border-color: var(--gold); opacity: 1; filter: none;
+    background: rgba(241,196,15,.12);
+  }
+
+  /* Typography swapped: the floor label now carries the headline treatment and
+     the machine name the small uppercase one. Spacing stays with the position. */
+  .floor { font-size: 19px; font-weight: 700; line-height: 1.25; padding-right: 60px; }
+  .mname { font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .5px; margin: 6px 0 2px; padding-right: 60px; }
+  .marea { font-size: 13px; color: var(--muted); margin-bottom: 14px; }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 7px 14px; border-radius: 20px; font-size: 14px; font-weight: 700;
+    letter-spacing: .3px;
+  }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .badge.online  { background: rgba(46,204,113,.15); color: var(--green); }
+  .badge.online  .dot { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 1.8s infinite; }
+  .badge.error   { background: rgba(231,76,60,.15); color: var(--red); }
+  .badge.error   .dot { background: var(--red); box-shadow: 0 0 8px var(--red); }
+  .badge.offline { background: rgba(231,76,60,.15); color: var(--red); }
+  .badge.offline .dot { background: var(--red); }
+  .badge.loading { background: rgba(147,112,84,.2); color: var(--muted); }
+  .badge.loading .dot { background: var(--muted); animation: pulse 1s infinite; }
+
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
+  /* Bean stock, from the machine's latest reported issue. Sits under the status
+     badge because it is independent of it: a machine can be ONLINE with no beans. */
+  .beans { margin-top: 10px; font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+  .beans.out { color: var(--orange); }
+  .beans.ok, .beans.unknown { color: var(--muted); font-weight: 400; font-size: 12px; }
+  .pill.nobeans { color: var(--orange); }
+  /* Why a FAULTY machine is faulty: its latest reported issue. */
+  .fault { margin-top: 8px; font-size: 13px; color: var(--red); }
+
+  .meta { margin-top: 14px; font-size: 12px; color: var(--muted); }
+  .meta div { margin-top: 3px; }
+  .meta a { color: var(--accent); text-decoration: none; }
+  .meta a:hover { text-decoration: underline; }
+  /* Health strip: layers 1 and 2 only -- is the page being served, and is the
+     CoffeeBot API answering. Layer 3 (are the machines up) is the summary pills'
+     job. Keeping the two apart is the whole point of this strip. */
+  .health {
+    display: flex; align-items: center; gap: 22px; flex-wrap: wrap;
+    padding: 10px 28px; font-size: 13px; color: var(--muted);
+    background: var(--card); border-bottom: 1px solid var(--card-border);
+  }
+  .hseg { display: inline-flex; align-items: center; gap: 8px; }
+  .hseg .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--gray); }
+  .hseg.ok       { color: var(--green); } .hseg.ok       .dot { background: var(--green); }
+  .hseg.warn     { color: var(--amber); } .hseg.warn     .dot { background: var(--amber); }
+  .hseg.bad      { color: var(--red);   } .hseg.bad      .dot { background: var(--red); }
+  .hseg.checking .dot { background: var(--muted); animation: pulse 1s infinite; }
+
+  /* Callouts */
+  .callouts { display: flex; flex-direction: column; gap: 10px; padding: 16px 28px 0; }
+  .callout {
+    background: var(--card); border: 1px solid var(--card-border);
+    border-left: 4px solid var(--gray); border-radius: 10px;
+    padding: 14px 16px; font-size: 13px; line-height: 1.55; color: var(--muted);
+  }
+  .callout b { display: block; margin-bottom: 4px; font-size: 14px; }
+  .callout.bad  { border-left-color: var(--red); }   .callout.bad  b { color: var(--red); }
+  .callout.warn { border-left-color: var(--amber); } .callout.warn b { color: var(--amber); }
+
+  /* "Unknown" means we have no information -- deliberately NOT red, which here means
+     "we have information and it is bad". Hatched so it differs by texture too, not
+     by hue alone. */
+  .card.unknown::before {
+    background: repeating-linear-gradient(135deg,
+      var(--amber) 0 4px, transparent 4px 8px);
+  }
+  .badge.unknown { background: rgba(229,154,60,.15); color: var(--amber); }
+  .badge.unknown .dot { background: var(--amber); }
+  .pill.unknown { color: var(--amber); }
+
+  /* Toast stack, bottom-right. column-reverse means appending puts the newest above
+     the older ones, and firstChild is therefore always the oldest. */
+  .toasts {
+    position: fixed; right: 20px; bottom: 20px; z-index: 50;
+    display: flex; flex-direction: column-reverse; gap: 10px; max-width: 320px;
+  }
+  .toast {
+    display: flex; gap: 10px; align-items: flex-start;
+    background: var(--card); border: 1px solid var(--card-border);
+    border-left: 4px solid var(--gray); border-radius: 10px;
+    padding: 12px 14px; font-size: 13px; color: var(--text);
+    box-shadow: 0 6px 20px rgba(0,0,0,.35);
+    animation: toastin .18s ease;
+  }
+  @keyframes toastin {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: none; }
+  }
+  .toast.up   { border-left-color: var(--green); }
+  .toast.down { border-left-color: var(--red); }
+  .toast.info { border-left-color: var(--accent); }
+  .toast.beans { border-left-color: var(--orange); }
+  .toast b { display: block; margin-bottom: 2px; }
+  .toast .tmeta { color: var(--muted); font-size: 11px; }
+  .toast .tclose {
+    margin-left: auto; background: transparent; border: none; color: var(--muted);
+    font-size: 15px; line-height: 1; padding: 0 2px; cursor: pointer;
+  }
+  .toast .tclose:hover { color: var(--text); }
+
+  footer { text-align: center; color: var(--muted); font-size: 12px; padding: 0 0 30px; }
+</style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1><span class="cup">&#9749;</span>CoffeeBot Machine Status</h1>
+      <div class="sub">Live status pulled from the CoffeeBot customer portal API</div>
+    </div>
+    <div class="controls">
+      <button class="ghost" id="themeBtn" onclick="toggleTheme()" title="Switch theme">&#9790; Dark</button>
+      <label class="ctl" title="Re-fetch machine status automatically on a timer">
+        <span class="switch">
+          <input type="checkbox" id="autoRefreshChk" role="switch" onchange="applyRefreshSetting()" />
+          <span class="slider"></span>
+        </span>
+        Auto-refresh
+      </label>
+      <label class="ctl" title="Play a short sound with each alert">
+        <span class="switch">
+          <input type="checkbox" id="soundChk" role="switch" onchange="applySoundSetting()" />
+          <span class="slider"></span>
+        </span>
+        Sound
+      </label>
+      <select id="intervalSel" onchange="applyRefreshSetting()" disabled hidden>
+        <option value="60">every 1 min</option>
+        <option value="300">every 5 min</option>
+        <option value="600">every 10 min</option>
+        <option value="900">every 15 min</option>
+        <option value="1800">every 30 min</option>
+        <option value="3600">every 1 hour</option>
+        <option value="7200">every 2 hours</option>
+      </select>
+      <span class="updated" id="updated">Not yet loaded</span>
+      <button id="refreshBtn" onclick="refreshAll()">Refresh now</button>
+    </div>
+  </header>
+
+  <!-- Layers 1 and 2. The dashboard segment is deliberately tautological: it is the
+       sentence that answers the question users actually ask when they see red. -->
+  <div class="health" id="health" role="status">
+    <span class="hseg ok"
+          title="You are viewing this page, so the web server hosting it is up. This is independent of the CoffeeBot API and of the machines themselves."><span
+          class="dot"></span>Dashboard running</span>
+    <span class="hseg checking" id="healthFeed"><span class="dot"></span>Checking data feed…</span>
+  </div>
+
+  <!-- Add machine -->
+  <div class="addbar">
+    <div class="field">
+      <span>Label (optional)</span>
+      <input id="addLabel" type="text" placeholder="e.g. GBS BTS L5" onkeydown="if(event.key==='Enter')addMachine()" />
+    </div>
+    <div class="field">
+      <span>5-digit serial code</span>
+      <input id="addSerial" class="serial" type="text" inputmode="numeric" maxlength="5" placeholder="29903" onkeydown="if(event.key==='Enter')addMachine()" />
+    </div>
+    <button id="addBtn" onclick="addMachine()">Add machine</button>
+    <button class="ghost" id="restoreBtn" onclick="restoreDefaults()" title="Add back any of the default machines that are missing">Restore defaults</button>
+    <span class="addmsg" id="addMsg"></span>
+  </div>
+
+  <div class="summary" id="summary"></div>
+  <div class="callouts" id="callouts"></div>
+  <div class="grid" id="grid"></div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <footer>Your machine list &amp; refresh setting are saved in this browser &middot; Data source: live-api.coffeebot.com.my</footer>
+
+<script>
+  // test-dashboard.js extracts this exact block with the regex /<script>([\s\S]*?)<\/script>/
+  // and runs it in a node vm sandbox. Keep this the only <script> tag, with no
+  // attributes on it, so that regex keeps matching. That sandbox has no `document`,
+  // `location`, `localStorage` or `fetch` -- so any new top-level (module-scope)
+  // statement added to this block must not assume those exist, either by avoiding
+  // them or by guarding/try-catching around them the way loadMachines() and init()
+  // do below. One unguarded top-level reference throws during evaluation and takes
+  // out the entire node test suite, not just one test.
+  const API = "https://live-api.coffeebot.com.my/graphql";
+  const QUERY = `query getCustomerPortalMachine($serialNo: String!) {
+    getCustomerPortalMachine(serialNo: $serialNo) {
+      id
+      name
+      status
+      area { name }
+      lastServiceDate
+    }
+  }`;
+
+  // QUERY plus the machine's latest reported issue -- the same getMachineLiveStatus
+  // CoffeeBot's own customer portal shows. It drives the bean line and the reason on
+  // Error cards. (These used to come from the machine error log, which CoffeeBot
+  // closed to customers on 2026-11-17.) Asked in the same request as the status so
+  // it adds no load; fetchMachine() falls back to plain QUERY if this part is ever
+  // rejected, so losing it can only cost those lines, never the status itself.
+  const QUERY_LIVE = `query getMachineWithLiveStatus($serialNo: String!) {
+    getCustomerPortalMachine(serialNo: $serialNo) {
+      id
+      name
+      status
+      area { name }
+      lastServiceDate
+    }
+    getMachineLiveStatus(serialNo: $serialNo) {
+      isDown
+      fault
+      reportedAt
+      hasOpenJob
+    }
+  }`;
+  // The issue text CoffeeBot reports for an empty bean hopper.
+  const NO_BEANS = "no beans";
+  // How long after a "no beans" report we keep calling the machine out. It is only
+  // reported when someone tries a coffee and nothing is reported on refill, so a
+  // quiet empty machine fades after this.
+  const BEAN_WINDOW_MS = 60 * 60 * 1000;
+
+  const LS_MACHINES = "coffeebot_machines_v2";
+  const LS_INTERVAL = "coffeebot_interval_v1";
+  const LS_AUTO = "coffeebot_autorefresh_v1";
+  const LS_THEME = "coffeebot_theme_v1";
+  const LS_BELLS = "coffeebot_bells_v1";
+  const LS_LASTSTATUS = "coffeebot_laststatus_v1";
+  const LS_SOUND = "coffeebot_sound_v1";
+  const LS_LASTBEANS = "coffeebot_lastbeans_v1";
+
+  // Default machine list (used the first time only; afterwards the saved list wins).
+  const DEFAULT_MACHINES = [
+    { floor: "GBS BTS L4", serialNo: "36608" },
+    { floor: "GBS BTS L5", serialNo: "29903" },
+    { floor: "GBS BTS L6", serialNo: "76852" },
+    { floor: "GBS BTS L7", serialNo: "76853" },
+    { floor: "GBS BTS L8", serialNo: "36609" },
+    { floor: "GBS BTS L9", serialNo: "36607" },
+    { floor: "OpenDC",     serialNo: "36605" },
+  ];
+
+  // The defaults' labels before the "GBS BTS Ln" rename. A saved list still carrying
+  // one of these on its own serial is renamed on load; see renameOldDefaults().
+  const OLD_DEFAULT_LABELS = {
+    "36608": "Level 4", "29903": "Level 5", "76852": "Level 6",
+    "76853": "Level 7", "36609": "Level 8", "36607": "Level 9",
+  };
+
+  // ----- demo mode -----
+  // ?demo=all-offline etc. renders synthetic results with no network call, so every
+  // state can be verified from a host that cannot reach the CoffeeBot API. Inert
+  // unless the parameter is present.
+  //
+  // The try/catch is load-bearing, not defensive habit: this is a top-level statement
+  // and `location`/`URLSearchParams` do not exist in the node test sandbox. Without it
+  // the whole test suite dies here before a single test runs.
+  const DEMO = (function () {
+    try { return new URLSearchParams(location.search).get("demo"); } catch (e) { return null; }
+  })();
+
+  // These sets have six entries, one per GBS BTS L4-L9 default; demoResults()
+  // wraps with `i % set.length`, so the seventh default (OpenDC) repeats the first
+  // entry, and a saved list that has drifted from the default (extra machines, or
+  // fewer) will repeat or truncate states rather than reproduce the documented
+  // verification matrix exactly.
+  const DEMO_SETS = {
+    "all-online":  ["ONLINE", "ONLINE", "ONLINE", "ONLINE", "ONLINE", "ONLINE"],
+    "all-offline": ["OFFLINE", "OFFLINE", "OFFLINE", "OFFLINE", "OFFLINE", "OFFLINE"],
+    "mixed":       ["ONLINE", "ONLINE", "ONLINE", "ONLINE", "OFFLINE", "FAULTY"],
+    "partial":     ["ONLINE", "ONLINE", "ONLINE", "OFFLINE", null, null],
+    "feed-down":   [null, null, null, null, null, null],
+    "transition":  ["OFFLINE", "OFFLINE", "OFFLINE", "OFFLINE", "OFFLINE", "OFFLINE"],
+    "beans":       ["ONLINE", "ONLINE", "ONLINE", "ONLINE", "ONLINE", "FAULTY", "ONLINE"],
+  };
+
+  // Whether demo mode is actually active. `DEMO` alone is not enough: an unrecognised
+  // value (a typo, a future param collision) must fall through to real data AND must
+  // not be marked as demo, or we would label live results synthetic.
+  const DEMO_ACTIVE = !!(DEMO && DEMO_SETS[DEMO]);
+
+  // ?demo=transition flips every machine between OFFLINE and ONLINE on each refresh:
+  // the first refresh sets the baseline silently (rule 1), the second fires an alert
+  // for every armed bell. This is the only way to exercise the alert path from a host
+  // that cannot reach the CoffeeBot API.
+  let demoTick = 0;
+
+  // ?demo=beans latest reported issues, one per default machine, as [issue, minutes
+  // ago]; [] is no reported issue and null is live status unavailable. Covers out,
+  // a non-bean issue, aged-out, none, a FAULTY reason and unknown. The first machine
+  // is handled in demoResults(): it flips between out and clear on each refresh,
+  // which is how the bean alert path gets exercised.
+  const DEMO_LIVE = [
+    [],
+    ["extra cups before making products", 20],
+    [NO_BEANS, 180],
+    [],
+    [NO_BEANS, 45],
+    ["canister motor 5 blocked", 6],
+    null,
+  ];
+
+  // null means "this fetch failed"; anything else is a status string.
+  function demoResults() {
+    let set = DEMO_SETS[DEMO] || [];
+    const tick = demoTick++;
+    if (DEMO === "transition") {
+      const st = (tick % 2 === 0) ? "OFFLINE" : "ONLINE";
+      set = [st, st, st, st, st, st];
+    }
+    const now = Date.now();
+    const toLive = (p) => p === null ? null : { isDown: false, hasOpenJob: false,
+      fault: p.length ? p[0] : null,
+      reportedAt: p.length ? new Date(now - p[1] * 60000).toISOString() : null };
+    return machines.map(function (m, i) {
+      const st = set[i % set.length];
+      if (st === null) return { machine: m, error: "Failed to fetch (demo)" };
+      // Outside ?demo=beans, FAULTY machines still get a reason so the fault line
+      // shows in ?demo=mixed too.
+      let p = st === "FAULTY" ? ["canister motor 5 blocked", 6] : [];
+      if (DEMO === "beans") {
+        p = i === 0 ? (tick % 2 === 0 ? [] : [NO_BEANS, 1]) : DEMO_LIVE[i % DEMO_LIVE.length];
+      }
+      return { machine: m, data: {
+        id: "demo-" + m.serialNo,
+        name: "CoffeeBot Pro 300",
+        status: st,
+        area: { name: "Demo pantry" },
+        lastServiceDate: "2026-08-03T09:00:00Z",
+        live: toLive(p),
+      } };
+    });
+  }
+
+  let machines = loadMachines();
+  sortMachines();
+
+  let bells = loadBells();            // serials with an armed bell
+  let remembered = loadRemembered();  // serial -> "online" | "notOnline"
+  let rememberedBeans = loadRememberedBeans();  // serial -> "out" | "notOut"
+
+  function loadBells() {
+    try {
+      const raw = localStorage.getItem(LS_BELLS);
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return [];
+  }
+  function saveBells() {
+    try { localStorage.setItem(LS_BELLS, JSON.stringify(bells)); } catch (e) {}
+  }
+  function loadRemembered() {
+    try {
+      const raw = localStorage.getItem(LS_LASTSTATUS);
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return {};
+  }
+  function saveRemembered() {
+    try { localStorage.setItem(LS_LASTSTATUS, JSON.stringify(remembered)); } catch (e) {}
+  }
+  function loadRememberedBeans() {
+    try {
+      const raw = localStorage.getItem(LS_LASTBEANS);
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return {};
+  }
+  function saveRememberedBeans() {
+    try { localStorage.setItem(LS_LASTBEANS, JSON.stringify(rememberedBeans)); } catch (e) {}
+  }
+
+  function loadMachines() {
+    try {
+      const raw = localStorage.getItem(LS_MACHINES);
+      if (raw) return renameOldDefaults(JSON.parse(raw));
+    } catch (e) {}
+    return DEFAULT_MACHINES.slice();
+  }
+
+  // The saved list wins over DEFAULT_MACHINES, so renaming a default would otherwise
+  // never reach anyone who has opened the dashboard before. Only a label that is
+  // still exactly the old default for that serial is touched: one the user typed
+  // themselves is theirs. Not saved back here; the next saveMachines() persists it.
+  function renameOldDefaults(list) {
+    return list.map(function (m) {
+      if (OLD_DEFAULT_LABELS[m.serialNo] !== m.floor) return m;
+      const d = DEFAULT_MACHINES.filter(x => x.serialNo === m.serialNo)[0];
+      return d ? Object.assign({}, m, { floor: d.floor }) : m;
+    });
+  }
+
+  // Sort ascending by the number found in the label (e.g. "GBS BTS L5" -> 5).
+  // Entries without a number sort to the end, then alphabetically.
+  function sortMachines() {
+    const num = (s) => { const m = String(s).match(/\d+/); return m ? parseInt(m[0], 10) : Infinity; };
+    machines.sort((a, b) => {
+      const d = num(a.floor) - num(b.floor);
+      if (d !== 0) return d;
+      return String(a.floor).localeCompare(String(b.floor));
+    });
+  }
+  function saveMachines() {
+    try { localStorage.setItem(LS_MACHINES, JSON.stringify(machines)); } catch (e) {}
+  }
+
+  // ----- status helpers -----
+  // API status enum: ONLINE, OFFLINE, FAULTY  (FAULTY is shown as "Error")
+  function classify(status) {
+    switch ((status || "").toUpperCase()) {
+      case "ONLINE":  return { state: "online",  label: "Online" };
+      case "FAULTY":  return { state: "error",   label: "Error" };
+      case "OFFLINE": return { state: "offline", label: "Offline" };
+      default:        return { state: "error",   label: status || "Unknown" };
+    }
+  }
+
+  // Bucket a results array into the counts every renderer needs.
+  //   answered / failed  -> layer 2, is the data feed working
+  //   onlineCount / problems -> layer 3, are the machines up
+  // Keeping these separate is the entire point of this feature: a fetch failure is an
+  // absence of information and must never be counted as a machine problem.
+  function summarize(results) {
+    let answered = 0, failed = 0, onlineCount = 0, problems = 0;
+    results.forEach(function (r) {
+      if (r.error) { failed++; return; }
+      answered++;
+      if (classify(r.data.status).state === "online") onlineCount++;
+      else problems++;
+    });
+    return {
+      total: results.length,
+      answered: answered,
+      failed: failed,
+      onlineCount: onlineCount,
+      problems: problems,
+      // Same count as `failed`, deliberately duplicated: `failed` is the feed-layer
+      // name, `unknown` is the machine-layer name for that same count, so the summary
+      // pills can say "Unknown" without borrowing feed vocabulary.
+      unknown: failed,
+    };
+  }
+
+  // Layer 2 health. Note that "every machine offline" is still `ok` here: the feed
+  // answered, it just answered with bad news. Conflating that with a feed failure is
+  // the bug this feature exists to fix.
+  function deriveFeedState(s) {
+    if (s.total === 0) return "idle";
+    if (s.answered === 0) return "down";
+    if (s.failed > 0) return "partial";
+    return "ok";
+  }
+
+  // Which banner, if any, belongs above the grid. Returns "all-offline",
+  // "feed-down", or null. The two are mutually exclusive by construction.
+  // Contract: feedState must be deriveFeedState(s) for this same s -- the caller
+  // computes it once and passes it here and to the health strip so the two can
+  // never disagree.
+  function decideCallout(s, feedState) {
+    if (feedState === "down") return "feed-down";
+    // The answered >= 2 guard stops a single switched-off machine on a one-machine
+    // dashboard from raising a site-wide alarm.
+    if (feedState === "ok" && s.onlineCount === 0 && s.answered >= 2) return "all-offline";
+    return null;
+  }
+
+  // The sentence shown in the health strip's feed segment.
+  // times: { lastFetch: "HH:MM:SS"|null, lastGood: "HH:MM:SS"|null }
+  // Times are passed in rather than read from Date so this stays pure and testable.
+  function feedStripText(feedState, s, times) {
+    switch (feedState) {
+      case "idle":
+        return "No machines on the dashboard";
+      case "ok":
+        return "Data feed OK · CoffeeBot API replied " + (times.lastFetch || "—") +
+               " · " + s.answered + " of " + s.total + " answered";
+      case "partial":
+        return "Data feed degraded · " + s.answered + " of " + s.total +
+               " answered at " + (times.lastFetch || "—") + " · " + s.failed + " could not be read";
+      case "down":
+        return "Cannot reach CoffeeBot API · " +
+               (times.lastGood ? "last good reply " + times.lastGood
+                               : "no successful reply yet") +
+               " · statuses unavailable";
+      default:
+        return "Checking data feed…";
+    }
+  }
+
+  // ----- notifications: transition detection -----
+
+  // Collapse the API's three statuses to the binary the bells care about.
+  function liveness(status) {
+    return classify(status).state === "online" ? "online" : "notOnline";
+  }
+
+  // Compare this refresh against what we last knew and decide what to announce.
+  //
+  // Three rules, and the third is what keeps this from becoming noise:
+  //   1. A machine we have never seen is recorded silently, so a page reload cannot
+  //      produce a burst of alerts.
+  //   2. Only edges between online and notOnline count. OFFLINE -> FAULTY is a change,
+  //      but not the one the user asked to hear about.
+  //   3. A fetch failure is an ABSENCE of information, not a transition: leave the
+  //      remembered value untouched and say nothing. Without this, a 30-second API
+  //      blip fires "went offline" for every machine and then "came back online" for
+  //      every machine on recovery.
+  //
+  // State is remembered for every machine, armed or not, so arming a bell later does
+  // not immediately fire against an empty baseline.
+  function detectTransitions(results, remembered, bells) {
+    const next = Object.assign({}, remembered);
+    const events = [];
+    results.forEach(function (r) {
+      const serial = r.machine.serialNo;
+      if (r.error) return;                              // rule 3
+      const now = liveness(r.data.status);
+      const before = next[serial];
+      next[serial] = now;
+      if (before === undefined) return;                 // rule 1
+      if (before === now) return;                       // rule 2
+      if (bells.indexOf(serial) === -1) return;
+      events.push({
+        serialNo: serial,
+        floor: r.machine.floor,
+        from: before,
+        to: now,
+        label: classify(r.data.status).label,
+      });
+    });
+    return { events: events, remembered: next };
+  }
+
+  // ----- bean stock and fault reason -----
+  // `live` is getMachineLiveStatus for one machine ({ fault, reportedAt, ... }), or
+  // null/undefined when it could not be read. Only the single latest issue is known:
+  // a "no beans" followed by any other issue is no longer visible.
+
+  // { state, at }: "out" if the latest issue is "no beans" reported within
+  // BEAN_WINDOW_MS (at = its time); "ok" otherwise, with `at` set only for an aged
+  // "no beans"; "unknown" without live status. `now` is passed in rather than read
+  // from Date so this stays pure and testable.
+  function beanState(live, now) {
+    if (!live) return { state: "unknown", at: null };
+    const t = Date.parse(live.reportedAt);
+    if (String(live.fault || "").trim().toLowerCase() !== NO_BEANS || isNaN(t))
+      return { state: "ok", at: null };
+    return { state: now - t <= BEAN_WINDOW_MS ? "out" : "ok", at: t };
+  }
+
+  // "12 min ago", "3 h ago", "2 days ago". Negative ages (client clock slightly
+  // behind the API's) read as "just now" rather than as the future.
+  function agoText(ms) {
+    const min = Math.floor(ms / 60000);
+    if (min < 1) return "just now";
+    if (min < 60) return min + " min ago";
+    const h = Math.floor(min / 60);
+    if (h < 24) return h + " h ago";
+    const d = Math.floor(h / 24);
+    return d + (d === 1 ? " day ago" : " days ago");
+  }
+
+  // "canister motor 4 open circuit · 6 min ago", or null if nothing is reported.
+  // Only ever shown on a FAULTY card: on an ONLINE or OFFLINE one the latest issue
+  // is history, not the reason for the current status.
+  function faultText(live, now) {
+    if (!live || !live.fault) return null;
+    const t = Date.parse(live.reportedAt);
+    return isNaN(t) ? live.fault : live.fault + " · " + agoText(now - t);
+  }
+
+  // Bean counterpart of detectTransitions(), with the same rules: never-seen machines
+  // are recorded silently, and missing data (the machine, or just its live status)
+  // leaves the remembered value alone. Only the edge INTO "out" is announced: there is
+  // no refill report, so the edge out of "out" is merely the window expiring, and
+  // announcing it as "refilled" would be a guess.
+  function detectBeanAlerts(results, rememberedBeans, bells, now) {
+    const next = Object.assign({}, rememberedBeans);
+    const events = [];
+    results.forEach(function (r) {
+      const serial = r.machine.serialNo;
+      if (r.error || !r.data.live) return;
+      const b = beanState(r.data.live, now);
+      const cur = b.state === "out" ? "out" : "notOut";
+      const before = next[serial];
+      next[serial] = cur;
+      if (before === undefined || before === cur || cur !== "out") return;
+      if (bells.indexOf(serial) === -1) return;
+      events.push({ serialNo: serial, floor: r.machine.floor, at: b.at });
+    });
+    return { events: events, remembered: next };
+  }
+
+  function fmtDate(iso) {
+    if (!iso) return "—";
+    try {
+      return new Date(iso).toLocaleString(undefined,
+        { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    } catch { return iso; }
+  }
+
+  // Cleared for the rest of the session the first time the API rejects
+  // getMachineLiveStatus, so we stop sending a query it will not answer.
+  let liveSupported = true;
+
+  // The machine's status object, with `live` set to its getMachineLiveStatus (null if
+  // unavailable). Errors about the live part alone never fail the machine.
+  async function fetchMachine(serialNo) {
+    const withLive = liveSupported;
+    const res = await fetch(API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ query: withLive ? QUERY_LIVE : QUERY, variables: { serialNo } }),
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const json = await res.json();
+    const m = json.data && json.data.getCustomerPortalMachine;
+    if (m) {
+      m.live = (withLive && json.data.getMachineLiveStatus) || null;
+      return m;
+    }
+    const errs = json.errors || [];
+    // The whole request failed because of the live part -- the field was rejected
+    // outright, or its error blanked the response. Retry once without it. A wrong
+    // serial ("No machine (…) found") is NOT this case and is reported as-is.
+    if (withLive && errs.some(e => (e.extensions && e.extensions.code === "GRAPHQL_VALIDATION_FAILED") ||
+                                   (e.path && e.path[0] === "getMachineLiveStatus"))) {
+      liveSupported = false;
+      return fetchMachine(serialNo);
+    }
+    if (errs.length) throw new Error(errs[0].message);
+    throw new Error("Machine not found");
+  }
+
+
+  // ----- add / remove -----
+  async function addMachine() {
+    const labelEl = document.getElementById("addLabel");
+    const serialEl = document.getElementById("addSerial");
+    const msg = document.getElementById("addMsg");
+    const btn = document.getElementById("addBtn");
+    const serial = serialEl.value.trim();
+    const label = labelEl.value.trim();
+
+    msg.className = "addmsg";
+    if (!/^\d{5}$/.test(serial)) {
+      msg.className = "addmsg err"; msg.textContent = "Serial must be exactly 5 digits.";
+      return;
+    }
+    if (machines.some(m => m.serialNo === serial)) {
+      msg.className = "addmsg err"; msg.textContent = "That serial is already on the dashboard.";
+      return;
+    }
+
+    btn.disabled = true; msg.className = "addmsg"; msg.textContent = "Checking…";
+    try {
+      const data = await fetchMachine(serial);           // validate it exists
+      machines.push({ floor: label || (data.name || ("Machine " + serial)), serialNo: serial });
+      sortMachines();
+      saveMachines();
+      labelEl.value = ""; serialEl.value = "";
+      msg.className = "addmsg ok"; msg.textContent = "Added: " + (data.name || serial);
+      refreshAll();
+    } catch (e) {
+      msg.className = "addmsg err"; msg.textContent = "Could not add: " + (e.message || "not found");
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function restoreDefaults() {
+    const msg = document.getElementById("addMsg");
+    const have = new Set(machines.map(m => m.serialNo));
+    const added = DEFAULT_MACHINES.filter(d => !have.has(d.serialNo));
+    if (!added.length) {
+      msg.className = "addmsg ok"; msg.textContent = "All " + DEFAULT_MACHINES.length + " default machines are already on the dashboard.";
+      return;
+    }
+    added.forEach(d => machines.push({ floor: d.floor, serialNo: d.serialNo }));
+    sortMachines();
+    saveMachines();
+    msg.className = "addmsg ok";
+    msg.textContent = "Restored " + added.length + " machine" + (added.length > 1 ? "s" : "") + ": " + added.map(d => d.floor).join(", ");
+    refreshAll();
+  }
+
+  function removeMachine(serialNo) {
+    // Note: this always mutates the real, persisted machine list -- demo mode only
+    // fakes the fetched status, not the machine objects themselves. Removing a card
+    // while poking at ?demo= prunes the saved list exactly as it would in live use.
+    machines = machines.filter(m => m.serialNo !== serialNo);
+    saveMachines();
+    // Drop the bell and the remembered status too, so re-adding a machine starts from
+    // a clean baseline instead of firing an alert against a stale one.
+    bells = bells.filter(s => s !== serialNo);
+    delete remembered[serialNo];
+    delete rememberedBeans[serialNo];
+    saveBells();
+    saveRemembered();
+    saveRememberedBeans();
+    render(lastResults.filter(r => r.machine.serialNo !== serialNo));
+  }
+
+  function toggleBell(serialNo) {
+    const i = bells.indexOf(serialNo);
+    if (i === -1) bells.push(serialNo); else bells.splice(i, 1);
+    saveBells();
+    // This click is a user gesture, which is the only place audio can be unlocked.
+    if (soundOn) primeAudio();
+    const notice = ensureRefreshForBells();
+    render(lastResults);
+    if (notice) showToast({ kind: "info", title: notice });
+  }
+
+  // ----- rendering -----
+  // Bean line for a card: orange when out, a muted note for an aged "no beans", and
+  // nothing when no bean issue is reported -- only the latest issue is known, so
+  // "no recent alerts" would claim more than we know.
+  function renderBeans(live, now) {
+    const b = beanState(live, now);
+    if (b.state === "unknown") return '<div class="beans unknown">Beans: status unknown</div>';
+    if (b.at === null) return "";
+    const ago = agoText(now - b.at);
+    const title = ' title="Machine reported no beans at ' + escapeHtml(new Date(b.at).toLocaleString()) +
+      '. Out of beans is inferred: nothing is reported on refill."';
+    return b.state === "out"
+      ? '<div class="beans out"' + title + '>&#9888; Out of beans &middot; ' + ago + '</div>'
+      : '<div class="beans ok"' + title + '>Beans: last reported out ' + ago + '</div>';
+  }
+
+  // r is one entry of the results array refreshAll() builds.
+  function renderCard(r) {
+    const machine = r.machine, data = r.data, error = r.error;
+    const armed = bells.indexOf(machine.serialNo) !== -1;
+    const portalUrl = "https://servicesupport.coffeebot.com.my/" + machine.serialNo;
+    let cardClass, badgeClass, badgeLabel, name, area, serviced, faultLine = "";
+
+    if (error) {
+      // Not red: we have no information, which is different from having bad news.
+      // "Unreachable" also read as though the MACHINE were unreachable, which was
+      // exactly the confusion this change exists to remove.
+      cardClass = "unknown"; badgeClass = "unknown"; badgeLabel = "Status unknown";
+      name = "Could not read status"; area = ""; serviced = "";
+    } else {
+      const c = classify(data.status);
+      cardClass = c.state; badgeClass = c.state; badgeLabel = c.label;
+      name = data.name || "Unnamed machine";
+      area = data.area && data.area.name ? data.area.name : "";
+      serviced = fmtDate(data.lastServiceDate);
+      const ft = c.state === "error" ? faultText(data.live, Date.now()) : null;
+      if (ft) faultLine = '<div class="fault" title="Latest issue the machine reported">' +
+                          escapeHtml(ft) + '</div>';
+    }
+
+    return `
+      <div class="card ${cardClass}" data-serial="${machine.serialNo}">
+        <button class="remove" title="Remove machine" onclick="removeMachine('${machine.serialNo}')">&times;</button>
+        <button class="bell${armed ? " on" : ""}" aria-pressed="${armed}"
+                title="${armed ? "Stop alerting me about" : "Alert me when"} this machine changes between online and offline, or runs out of beans"
+                onclick="toggleBell('${machine.serialNo}')">&#128276;</button>
+        <div class="floor">${escapeHtml(machine.floor)}</div>
+        <div class="mname">${escapeHtml(name)}</div>
+        <div class="marea">${escapeHtml(area)}</div>
+        <div class="badge ${badgeClass}"><span class="dot"></span>${badgeLabel}</div>
+        ${faultLine}
+        ${error ? "" : renderBeans(data.live, Date.now())}
+        <div class="meta">
+          ${error ? `<div style="color:var(--amber)">${escapeHtml(error)}</div>` : `<div>Last serviced: ${serviced}</div>`}
+          <div>Serial: ${machine.serialNo} &middot; <a href="${portalUrl}" target="_blank" rel="noopener">Open portal &#8599;</a></div>
+        </div>
+      </div>`;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+  }
+
+  function renderLoading() {
+    const grid = document.getElementById("grid");
+    if (!machines.length) { grid.innerHTML = ""; renderEmpty(); return; }
+    grid.innerHTML = machines.map(m => `
+      <div class="card loading" data-serial="${m.serialNo}">
+        <div class="floor">${escapeHtml(m.floor)}</div>
+        <div class="mname">Loading&hellip;</div>
+        <div class="marea">&nbsp;</div>
+        <div class="badge loading"><span class="dot"></span>Checking</div>
+        <div class="meta"><div>Serial: ${m.serialNo}</div></div>
+      </div>`).join("");
+    renderHealth("checking", summarize([]));
+  }
+
+  // Swap one machine's card in place as soon as its answer arrives, so the grid fills
+  // in machine by machine instead of waiting on the slowest request. No-op if the
+  // machine was removed while its request was in flight.
+  function replaceCard(r) {
+    const el = document.querySelector('.card[data-serial="' + r.machine.serialNo + '"]');
+    if (el) el.outerHTML = renderCard(r);
+  }
+
+  function renderEmpty() {
+    document.getElementById("summary").innerHTML = "";
+    document.getElementById("grid").innerHTML =
+      `<div class="empty">No machines yet. Add one above using its 5-digit serial code (e.g. 29903).</div>`;
+  }
+
+  // Takes the summary object rather than raw results, so the counts shown here can
+  // never drift from the ones the strip and callouts were computed from.
+  // beansOut is passed separately because it depends on the clock, which summarize()
+  // deliberately does not.
+  function renderSummary(s, beansOut) {
+    document.getElementById("summary").innerHTML =
+      '<div class="pill on">Online <b>' + s.onlineCount + '</b></div>' +
+      '<div class="pill err">Problems <b>' + s.problems + '</b></div>' +
+      '<div class="pill' + (beansOut ? ' nobeans' : '') + '">Out of beans <b>' + beansOut + '</b></div>' +
+      (s.unknown ? '<div class="pill unknown">Unknown <b>' + s.unknown + '</b></div>' : '') +
+      '<div class="pill">Total <b>' + s.total + '</b></div>';
+  }
+
+  let lastResults = [];
+  // Set at the end of every refreshAll(); lastGoodFetchAt only when something answered.
+  let lastFetchAt = null;
+  let lastGoodFetchAt = null;
+
+  function hhmmss(d) { return d ? d.toLocaleTimeString() : null; }
+
+  function renderHealth(feedState, s) {
+    const el = document.getElementById("healthFeed");
+    const cls = { ok: "ok", partial: "warn", down: "bad", checking: "checking", idle: "" };
+    el.className = "hseg " + (cls[feedState] || "");
+    const text = feedStripText(feedState, s,
+      { lastFetch: hhmmss(lastFetchAt), lastGood: hhmmss(lastGoodFetchAt) });
+    el.innerHTML = '<span class="dot"></span>' + escapeHtml(text) + (DEMO_ACTIVE ? " · DEMO" : "");
+  }
+
+  // Cache of the callouts region's last rendered HTML. role="alert" elements are
+  // re-announced by screen readers on insertion, so re-writing innerHTML on every
+  // poll -- even with identical content -- would re-read the same alert to a
+  // screen-reader user as often as every refresh tick. Comparing first and only
+  // touching the DOM on an actual change keeps a standing incident from becoming
+  // a repeating one.
+  let lastCalloutHtml = "";
+
+  function renderCallouts(feedState, s) {
+    const el = document.getElementById("callouts");
+    const which = decideCallout(s, feedState);
+    let html = "";
+
+    if (which === "all-offline") {
+      // "offline" is deliberately absent from this copy: onlineCount === 0 is also
+      // reached when every machine reports FAULTY, and a FAULTY machine is not an
+      // OFFLINE one -- claiming otherwise is exactly the kind of imprecision this
+      // feature exists to eliminate.
+      html =
+        '<div class="callout bad" role="alert">' +
+        '<b>None of the ' + s.total + ' machines are online.</b>' +
+        'The dashboard and the CoffeeBot API are both working normally — the API ' +
+        'answered for all ' + s.total + ' machines at ' +
+        escapeHtml(hhmmss(lastFetchAt) || "—") + ' and not one of them reports as ' +
+        'online. This points to a site-wide machine or power issue, not a dashboard fault.' +
+        '</div>';
+    } else if (which === "feed-down") {
+      html =
+        '<div class="callout warn" role="alert">' +
+        '<b>Cannot reach the CoffeeBot API.</b>' +
+        'The dashboard itself is running — it served this page — but it cannot ' +
+        'retrieve machine statuses right now, so every machine below shows as ' +
+        'Status unknown.' +
+        (lastGoodFetchAt
+          ? ' The last successful reading was at ' + escapeHtml(hhmmss(lastGoodFetchAt)) + '.'
+          : '') +
+        '</div>';
+    }
+
+    if (html === lastCalloutHtml) return;
+    lastCalloutHtml = html;
+    el.innerHTML = html;
+  }
+
+  const TOAST_MAX = 4;
+  const TOAST_MS = 10000;
+
+  // o: { kind: "up" | "down" | "beans" | "info", title: string, meta?: string }
+  // NOTE: `title` may contain the machine's floor label, which is free-text the user
+  // typed into the Add-machine form -- only the serial is validated. It MUST be
+  // escaped here.
+  function showToast(o) {
+    const wrap = document.getElementById("toasts");
+    // Evict the oldest rather than letting the stack grow off-screen.
+    while (wrap.children.length >= TOAST_MAX) wrap.removeChild(wrap.firstChild);
+
+    const el = document.createElement("div");
+    el.className = "toast " + o.kind;
+    el.setAttribute("role", "status");
+    el.innerHTML =
+      '<div><b>' + escapeHtml(o.title) + '</b>' +
+      (o.meta ? '<span class="tmeta">' + escapeHtml(o.meta) + '</span>' : '') +
+      '</div>';
+
+    const close = document.createElement("button");
+    close.className = "tclose";
+    close.setAttribute("aria-label", "Dismiss");
+    close.innerHTML = "&times;";
+    close.onclick = function () { if (el.parentNode) el.parentNode.removeChild(el); };
+    el.appendChild(close);
+
+    wrap.appendChild(el);
+    setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, TOAST_MS);
+  }
+
+  const BASE_TITLE = "CoffeeBot Machine Status";
+  let unseen = 0;   // transition alerts the user has not come back to the tab for
+
+  // Inline SVG so there is no extra file to serve. The alert variant carries a red
+  // dot, which is what shows when the tab is too narrow to display the title text.
+  const FAVICONS = {
+    plain: "data:image/svg+xml," + encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
+      '<text y="26" font-size="26">☕</text></svg>'),
+    alert: "data:image/svg+xml," + encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
+      '<text y="26" font-size="26">☕</text>' +
+      '<circle cx="24" cy="8" r="7" fill="#e74c3c" stroke="#ffffff" stroke-width="2"/>' +
+      '</svg>'),
+  };
+
+  function updateBadge() {
+    document.title = (unseen > 0 ? "(" + unseen + ") " : "") + BASE_TITLE;
+    const link = document.getElementById("favicon");
+    if (link) link.setAttribute("href", unseen > 0 ? FAVICONS.alert : FAVICONS.plain);
+  }
+
+  let soundOn = false;
+  let audioCtx = null;
+
+  // Browsers refuse to start audio outside a user gesture. Calling this from a click
+  // (the sound toggle, or arming a bell) is what makes later automatic alerts audible.
+  function primeAudio() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === "suspended") audioCtx.resume();
+    } catch (e) { audioCtx = null; }
+  }
+
+  // Short sine blip, synthesised so there is no audio file to ship.
+  function beep() {
+    if (!soundOn || !audioCtx) return;
+    try {
+      const t = audioCtx.currentTime;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = 660;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.15, t + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(t);
+      osc.stop(t + 0.26);
+    } catch (e) {}
+  }
+
+  function applySoundSetting() {
+    soundOn = document.getElementById("soundChk").checked;
+    try { localStorage.setItem(LS_SOUND, soundOn ? "1" : "0"); } catch (e) {}
+    if (soundOn) { primeAudio(); beep(); }   // audible confirmation, inside the gesture
+  }
+
+  const BELL_INTERVAL = 300;   // 5 min; already a member of ALLOWED_INTERVALS
+
+  // A bell is inert without polling, since transitions are only visible on a refresh.
+  // Returns a notice to show the user, or null if nothing needed changing. We say what
+  // we changed because a setting that moves with no explanation reads as a bug.
+  function ensureRefreshForBells() {
+    if (!bells.length) return null;
+    const chk = document.getElementById("autoRefreshChk");
+    const sel = document.getElementById("intervalSel");
+    const cur = parseInt(sel.value, 10) || DEFAULT_INTERVAL;
+    let changed = false;
+
+    if (!chk.checked) { chk.checked = true; changed = true; }
+    // Only slow settings are sped up; a user who chose 1 min keeps it.
+    if (cur > BELL_INTERVAL) { sel.value = String(BELL_INTERVAL); changed = true; }
+
+    if (!changed) return null;
+    applyRefreshSetting();
+    return "Auto-refresh turned on (every 5 minutes) so notifications can be delivered.";
+  }
+
+  // Run detection over a completed refresh and deliver whatever it returns.
+  function announce(results) {
+    const out = detectTransitions(results, remembered, bells);
+    remembered = out.remembered;
+    saveRemembered();
+    out.events.forEach(function (ev) {
+      showToast({
+        kind: ev.to === "online" ? "up" : "down",
+        title: ev.to === "online"
+          ? ev.floor + " came back online"
+          : ev.floor + " is now " + ev.label,
+        meta: new Date().toLocaleTimeString(),
+      });
+      // A visible tab has already been served notice by the toast; the unread badge
+      // exists for the backgrounded case, so only count it there.
+      if (document.hidden) unseen++;
+    });
+
+    const beansOut = detectBeanAlerts(results, rememberedBeans, bells, Date.now());
+    rememberedBeans = beansOut.remembered;
+    saveRememberedBeans();
+    beansOut.events.forEach(function (ev) {
+      showToast({
+        kind: "beans",
+        title: ev.floor + " is out of beans",
+        meta: "Machine reported no beans at " + new Date(ev.at).toLocaleTimeString(),
+      });
+      if (document.hidden) unseen++;
+    });
+
+    if (out.events.length || beansOut.events.length) {
+      // One beep per refresh, not one per event: N events in the same synchronous
+      // tick would otherwise start N identical envelopes at the same audioCtx time,
+      // summing constructively into a single loud (near-clipping) blip instead of
+      // N audible beeps.
+      beep();
+      updateBadge();
+    }
+  }
+
+  function render(results) {
+    lastResults = results;
+    const s = summarize(results);
+    if (!results.length) {
+      renderEmpty();
+      renderHealth("idle", s);
+      renderCallouts("idle", s);
+      return;
+    }
+    const feedState = deriveFeedState(s);
+    document.getElementById("grid").innerHTML =
+      results.map(renderCard).join("");
+    const now = Date.now();
+    renderSummary(s, results.filter(r => !r.error && beanState(r.data.live, now).state === "out").length);
+    renderHealth(feedState, s);
+    renderCallouts(feedState, s);
+  }
+
+  // ----- refresh loop -----
+  let refreshing = false;
+  let timer = null;
+
+  async function refreshAll() {
+    // Route through render() rather than calling renderEmpty() directly: render() is
+    // what keeps the health strip and callouts in step with the grid. Bypassing it
+    // here left the strip stuck on "Checking data feed…" forever.
+    if (!machines.length) { render([]); document.getElementById("updated").textContent = ""; return; }
+    if (refreshing) return;
+    refreshing = true;
+    const btn = document.getElementById("refreshBtn");
+    btn.disabled = true; btn.textContent = "Refreshing…";
+    renderLoading();
+
+    if (DEMO_ACTIVE) {
+      const results = demoResults();
+      lastFetchAt = new Date();
+      if (results.some(r => !r.error)) lastGoodFetchAt = lastFetchAt;
+      announce(results);
+      render(results);
+      document.getElementById("updated").textContent =
+        "Updated " + new Date().toLocaleTimeString() + " (demo)";
+      btn.disabled = false; btn.textContent = "Refresh now";
+      refreshing = false;
+      return;
+    }
+
+    // The CoffeeBot API can take tens of seconds to answer all machines (measured
+    // 2026-11-02), so each card is drawn the moment its own status lands rather than
+    // when the slowest one does.
+    const results = await Promise.all(machines.map(async (m) => {
+      let r;
+      try { r = { machine: m, data: await fetchMachine(m.serialNo) }; }
+      catch (e) { r = { machine: m, error: e.message || "Failed to load" }; }
+      replaceCard(r);
+      return r;
+    }));
+
+    lastFetchAt = new Date();
+    if (results.some(r => !r.error)) lastGoodFetchAt = lastFetchAt;
+    announce(results);
+    // Machines removed while their requests were in flight must not be re-drawn.
+    render(results.filter(r => machines.some(m => m.serialNo === r.machine.serialNo)));
+    document.getElementById("updated").textContent = "Updated " + new Date().toLocaleTimeString();
+    btn.disabled = false; btn.textContent = "Refresh now";
+    refreshing = false;
+  }
+
+  // ----- theme -----
+  function applyTheme(theme) {
+    document.documentElement.setAttribute("data-theme", theme);
+    const btn = document.getElementById("themeBtn");
+    // button shows the theme you'll switch TO
+    if (theme === "dark") btn.innerHTML = "&#9728; Light";
+    else btn.innerHTML = "&#9790; Dark";
+    try { localStorage.setItem(LS_THEME, theme); } catch (e) {}
+  }
+  function toggleTheme() {
+    const cur = document.documentElement.getAttribute("data-theme") || "dark";
+    applyTheme(cur === "dark" ? "light" : "dark");
+  }
+
+  // Intervals offered by the dropdown; anything else (e.g. a stale saved "30")
+  // falls back to DEFAULT_INTERVAL so the select never ends up blank.
+  const ALLOWED_INTERVALS = [60, 300, 600, 900, 1800, 3600, 7200];
+  const DEFAULT_INTERVAL = 3600;
+
+  function applyRefreshSetting() {
+    const chk = document.getElementById("autoRefreshChk");
+    const sel = document.getElementById("intervalSel");
+    const on = chk.checked;
+    const secs = parseInt(sel.value, 10) || DEFAULT_INTERVAL;
+
+    sel.hidden = !on;
+    sel.disabled = !on;
+    try {
+      localStorage.setItem(LS_AUTO, on ? "1" : "0");
+      localStorage.setItem(LS_INTERVAL, String(secs));
+    } catch (e) {}
+
+    if (timer) { clearInterval(timer); timer = null; }
+    if (on) timer = setInterval(refreshAll, secs * 1000);
+  }
+
+  // ----- init -----
+  // Browser-only. test-dashboard.js evaluates this same script outside a browser to
+  // unit-test the pure functions above, where `document` does not exist.
+  function init() {
+    let theme = "dark";
+    try { const t = localStorage.getItem(LS_THEME); if (t === "light" || t === "dark") theme = t; } catch (e) {}
+    applyTheme(theme);
+
+    let secs = DEFAULT_INTERVAL;
+    try {
+      const v = parseInt(localStorage.getItem(LS_INTERVAL), 10);
+      if (ALLOWED_INTERVALS.indexOf(v) !== -1) secs = v;
+    } catch (e) {}
+    document.getElementById("intervalSel").value = String(secs);
+
+    // Auto-refresh is off unless the user previously turned it on.
+    let auto = false;
+    try { auto = localStorage.getItem(LS_AUTO) === "1"; } catch (e) {}
+    document.getElementById("autoRefreshChk").checked = auto;
+
+    // Off unless previously enabled. Not primed here: there is no user gesture yet.
+    try { soundOn = localStorage.getItem(LS_SOUND) === "1"; } catch (e) {}
+    document.getElementById("soundChk").checked = soundOn;
+
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) { unseen = 0; updateBadge(); }
+    });
+    updateBadge();   // sets the plain favicon on first load
+
+    applyRefreshSetting();
+    refreshAll();
+  }
+  if (typeof document !== "undefined") init();
+
+  // Exposed for the node test harness. There is no `module` in a browser, so this
+  // is inert there.
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = {
+      classify: classify,
+      summarize: summarize,
+      deriveFeedState: deriveFeedState,
+      decideCallout: decideCallout,
+      feedStripText: feedStripText,
+      liveness: liveness,
+      detectTransitions: detectTransitions,
+      beanState: beanState,
+      agoText: agoText,
+      faultText: faultText,
+      detectBeanAlerts: detectBeanAlerts,
+      renameOldDefaults: renameOldDefaults,
+    };
+  }
+</script>
+</body>
+</html>
