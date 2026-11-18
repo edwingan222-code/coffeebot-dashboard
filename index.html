@@ -149,7 +149,9 @@
     display: flex; align-items: center; justify-content: center;
     filter: grayscale(1); opacity: .55;
   }
-  .bell:hover { border-color: var(--gold); opacity: 1; filter: none; }
+  /* Hover only brightens: it must not look armed, or a bell clicked off while the
+     pointer is still on it keeps showing gold until the pointer leaves. */
+  .bell:hover { border-color: var(--muted); opacity: .9; }
   .bell.on {
     border-color: var(--gold); opacity: 1; filter: none;
     background: rgba(241,196,15,.12);
