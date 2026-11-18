@@ -348,13 +348,11 @@
     }
   }`;
 
-  // The machine's latest reported issue -- the same getMachineLiveStatus CoffeeBot's
-  // own customer portal shows. It drives the bean line and the reason on Error cards.
-  // (These used to come from the machine error log, which CoffeeBot closed to
-  // customers on 2026-11-17.) A separate request, sent only after the statuses are
-  // in: the API takes ~2 s longer to answer this than QUERY (0.7 s vs 2.7 s for all
-  // seven machines, measured 2026-11-17), and asking for both in one request made
-  // every card wait for it. Failing here can only cost those lines.
+  // The machine's latest reported issue. It drives the bean line and the reason on
+  // Error cards. A separate request, sent only after the statuses are in: it takes
+  // ~2 s longer to answer than QUERY (0.7 s vs 2.7 s for all seven machines,
+  // measured 2026-11-17), and asking for both in one request made every card wait
+  // for it. Failing here can only cost those lines.
   const LIVE_QUERY = `query getMachineLiveStatus($serialNo: String!) {
     getMachineLiveStatus(serialNo: $serialNo) {
       isDown
@@ -863,8 +861,10 @@
     const i = bells.indexOf(serialNo);
     if (i === -1) bells.push(serialNo); else bells.splice(i, 1);
     saveBells();
-    // This click is a user gesture, which is the only place audio can be unlocked.
+    // This click is a user gesture, which is the only place audio can be unlocked --
+    // and the only place browsers let a page ask for notification permission.
     if (soundOn) primeAudio();
+    if (i === -1) askDesktopPermission();
     const notice = ensureRefreshForBells();
     render(lastResults);
     if (notice) showToast({ kind: "info", title: notice });
@@ -1148,19 +1148,67 @@
     return "Auto-refresh turned on (every 5 minutes) so notifications can be delivered.";
   }
 
+  // ----- desktop (system) notifications -----
+  // Browsers only offer these to secure (https) pages, so they work on the GitHub
+  // Pages copy and are silently absent on the plain-http reg111 one. They add to the
+  // toast, sound and tab badge rather than replacing them, and still need the page
+  // open in some tab: with no tab open, nothing is checking.
+
+  // o: { supported, permission, hidden, focused }. Shown only when the user has
+  // allowed them and is not already looking at the page -- if they are, the toast
+  // has told them, and a second pop-up would just be noise.
+  function shouldDesktopNotify(o) {
+    return !!(o.supported && o.permission === "granted" && (o.hidden || !o.focused));
+  }
+
+  function desktopSupported() {
+    return typeof Notification !== "undefined" && !!window.isSecureContext;
+  }
+
+  // Called when a bell is armed. Asks once; afterwards the browser remembers the
+  // answer and only the user can change it, in the browser's site settings.
+  function askDesktopPermission() {
+    if (!desktopSupported() || Notification.permission !== "default") return;
+    const done = function (p) {
+      if (p === "granted") showToast({ kind: "info",
+        title: "Desktop notifications on: armed machines will alert you even when this tab is in the background." });
+      else if (p === "denied") showToast({ kind: "info",
+        title: "Desktop notifications are blocked, so alerts will only show inside this page." });
+    };
+    try {
+      const r = Notification.requestPermission(done);   // older Safari: callback only
+      if (r && r.then) r.then(done);
+    } catch (e) {}
+  }
+
+  // o: { title, meta, tag }. `tag` makes a newer alert for the same machine and kind
+  // replace the older one instead of stacking.
+  function desktopNotify(o) {
+    if (!shouldDesktopNotify({ supported: desktopSupported(),
+                               permission: desktopSupported() ? Notification.permission : "denied",
+                               hidden: document.hidden, focused: document.hasFocus() })) return;
+    try {
+      const n = new Notification(o.title, { body: o.meta || "", tag: o.tag });
+      n.onclick = function () { window.focus(); n.close(); };
+    } catch (e) {}   // e.g. mobile Chrome, which only allows them from a service worker
+  }
+
   // Run detection over a completed refresh and deliver whatever it returns.
   function announce(results) {
     const out = detectTransitions(results, remembered, bells);
     remembered = out.remembered;
     saveRemembered();
     out.events.forEach(function (ev) {
-      showToast({
+      const alert = {
         kind: ev.to === "online" ? "up" : "down",
         title: ev.to === "online"
           ? ev.floor + " came back online"
           : ev.floor + " is now " + ev.label,
         meta: new Date().toLocaleTimeString(),
-      });
+        tag: ev.serialNo + ":status",
+      };
+      showToast(alert);
+      desktopNotify(alert);
       // A visible tab has already been served notice by the toast; the unread badge
       // exists for the backgrounded case, so only count it there.
       if (document.hidden) unseen++;
@@ -1170,11 +1218,14 @@
     rememberedBeans = beansOut.remembered;
     saveRememberedBeans();
     beansOut.events.forEach(function (ev) {
-      showToast({
+      const alert = {
         kind: "beans",
         title: ev.floor + " is out of beans",
         meta: "Machine reported no beans at " + new Date(ev.at).toLocaleTimeString(),
-      });
+        tag: ev.serialNo + ":beans",
+      };
+      showToast(alert);
+      desktopNotify(alert);
       if (document.hidden) unseen++;
     });
 
@@ -1353,6 +1404,7 @@
       beanState: beanState,
       agoText: agoText,
       renderBeans: renderBeans,
+      shouldDesktopNotify: shouldDesktopNotify,
       faultText: faultText,
       detectBeanAlerts: detectBeanAlerts,
       renameOldDefaults: renameOldDefaults,
