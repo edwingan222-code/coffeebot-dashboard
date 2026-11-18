@@ -182,7 +182,8 @@
      badge because it is independent of it: a machine can be ONLINE with no beans. */
   .beans { margin-top: 10px; font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
   .beans.out { color: var(--orange); }
-  .beans.ok, .beans.unknown { color: var(--muted); font-weight: 400; font-size: 12px; }
+  .beans.ok, .beans.unknown, .beans.pending { color: var(--muted); font-weight: 400; font-size: 12px; }
+  .beans.pending { animation: pulse 1.2s infinite; }
   .pill.nobeans { color: var(--orange); }
   /* Why a FAULTY machine is faulty: its latest reported issue. */
   .fault { margin-top: 8px; font-size: 13px; color: var(--red); }
@@ -347,20 +348,14 @@
     }
   }`;
 
-  // QUERY plus the machine's latest reported issue -- the same getMachineLiveStatus
-  // CoffeeBot's own customer portal shows. It drives the bean line and the reason on
-  // Error cards. (These used to come from the machine error log, which CoffeeBot
-  // closed to customers on 2026-11-17.) Asked in the same request as the status so
-  // it adds no load; fetchMachine() falls back to plain QUERY if this part is ever
-  // rejected, so losing it can only cost those lines, never the status itself.
-  const QUERY_LIVE = `query getMachineWithLiveStatus($serialNo: String!) {
-    getCustomerPortalMachine(serialNo: $serialNo) {
-      id
-      name
-      status
-      area { name }
-      lastServiceDate
-    }
+  // The machine's latest reported issue -- the same getMachineLiveStatus CoffeeBot's
+  // own customer portal shows. It drives the bean line and the reason on Error cards.
+  // (These used to come from the machine error log, which CoffeeBot closed to
+  // customers on 2026-11-17.) A separate request, sent only after the statuses are
+  // in: the API takes ~2 s longer to answer this than QUERY (0.7 s vs 2.7 s for all
+  // seven machines, measured 2026-11-17), and asking for both in one request made
+  // every card wait for it. Failing here can only cost those lines.
+  const LIVE_QUERY = `query getMachineLiveStatus($serialNo: String!) {
     getMachineLiveStatus(serialNo: $serialNo) {
       isDown
       fault
@@ -754,38 +749,45 @@
     } catch { return iso; }
   }
 
-  // Cleared for the rest of the session the first time the API rejects
-  // getMachineLiveStatus, so we stop sending a query it will not answer.
-  let liveSupported = true;
-
-  // The machine's status object, with `live` set to its getMachineLiveStatus (null if
-  // unavailable). Errors about the live part alone never fail the machine.
   async function fetchMachine(serialNo) {
-    const withLive = liveSupported;
     const res = await fetch(API, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify({ query: withLive ? QUERY_LIVE : QUERY, variables: { serialNo } }),
+      body: JSON.stringify({ query: QUERY, variables: { serialNo } }),
     });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const json = await res.json();
+    if (json.errors && json.errors.length) throw new Error(json.errors[0].message);
     const m = json.data && json.data.getCustomerPortalMachine;
-    if (m) {
-      m.live = (withLive && json.data.getMachineLiveStatus) || null;
-      return m;
+    if (!m) throw new Error("Machine not found");
+    return m;
+  }
+
+  // Cleared for the rest of the session the first time the API rejects LIVE_QUERY
+  // outright (it no longer knows the field), so we stop sending a query it will
+  // never answer.
+  let liveSupported = true;
+
+  // getMachineLiveStatus for one machine, or null if unavailable. Never throws:
+  // a missing latest issue only costs the bean and fault lines.
+  async function fetchLive(serialNo) {
+    if (!liveSupported) return null;
+    try {
+      const res = await fetch(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ query: LIVE_QUERY, variables: { serialNo } }),
+      });
+      if (!res.ok) return null;
+      const json = await res.json();
+      if ((json.errors || []).some(e => e.extensions && e.extensions.code === "GRAPHQL_VALIDATION_FAILED"))
+        liveSupported = false;
+      return (json.data && json.data.getMachineLiveStatus) || null;
+    } catch (e) {
+      return null;
     }
-    const errs = json.errors || [];
-    // The whole request failed because of the live part -- the field was rejected
-    // outright, or its error blanked the response. Retry once without it. A wrong
-    // serial ("No machine (…) found") is NOT this case and is reported as-is.
-    if (withLive && errs.some(e => (e.extensions && e.extensions.code === "GRAPHQL_VALIDATION_FAILED") ||
-                                   (e.path && e.path[0] === "getMachineLiveStatus"))) {
-      liveSupported = false;
-      return fetchMachine(serialNo);
-    }
-    if (errs.length) throw new Error(errs[0].message);
-    throw new Error("Machine not found");
   }
 
 
@@ -870,12 +872,14 @@
 
   // ----- rendering -----
   // Bean line for a card: orange when out, a muted note for an aged "no beans", and
-  // nothing when no bean issue is reported -- only the latest issue is known, so
-  // "no recent alerts" would claim more than we know.
+  // "Available" when the latest reported issue is anything else. "Available" is an
+  // inference -- only the latest issue is known, so a "no beans" followed by another
+  // issue reads as available -- and the tooltip says so.
   function renderBeans(live, now) {
     const b = beanState(live, now);
     if (b.state === "unknown") return '<div class="beans unknown">Beans: status unknown</div>';
-    if (b.at === null) return "";
+    if (b.at === null)
+      return '<div class="beans ok" title="Inferred: the latest issue this machine reported is not &quot;no beans&quot;.">Beans: Available</div>';
     const ago = agoText(now - b.at);
     const title = ' title="Machine reported no beans at ' + escapeHtml(new Date(b.at).toLocaleString()) +
       '. Out of beans is inferred: nothing is reported on refill."';
@@ -903,7 +907,7 @@
       name = data.name || "Unnamed machine";
       area = data.area && data.area.name ? data.area.name : "";
       serviced = fmtDate(data.lastServiceDate);
-      const ft = c.state === "error" ? faultText(data.live, Date.now()) : null;
+      const ft = c.state === "error" && !r.livePending ? faultText(data.live, Date.now()) : null;
       if (ft) faultLine = '<div class="fault" title="Latest issue the machine reported">' +
                           escapeHtml(ft) + '</div>';
     }
@@ -919,7 +923,8 @@
         <div class="marea">${escapeHtml(area)}</div>
         <div class="badge ${badgeClass}"><span class="dot"></span>${badgeLabel}</div>
         ${faultLine}
-        ${error ? "" : renderBeans(data.live, Date.now())}
+        ${error ? "" : r.livePending ? '<div class="beans pending">Checking latest issue&hellip;</div>'
+                                     : renderBeans(data.live, Date.now())}
         <div class="meta">
           ${error ? `<div style="color:var(--amber)">${escapeHtml(error)}</div>` : `<div>Last serviced: ${serviced}</div>`}
           <div>Serial: ${machine.serialNo} &middot; <a href="${portalUrl}" target="_blank" rel="noopener">Open portal &#8599;</a></div>
@@ -1234,18 +1239,32 @@
     // when the slowest one does.
     const results = await Promise.all(machines.map(async (m) => {
       let r;
-      try { r = { machine: m, data: await fetchMachine(m.serialNo) }; }
+      try { r = { machine: m, data: await fetchMachine(m.serialNo) }; r.livePending = true; }
       catch (e) { r = { machine: m, error: e.message || "Failed to load" }; }
       replaceCard(r);
       return r;
     }));
+    // Machines removed while their requests were in flight must not be re-drawn.
+    const stillListed = () => results.filter(r => machines.some(m => m.serialNo === r.machine.serialNo));
 
     lastFetchAt = new Date();
     if (results.some(r => !r.error)) lastGoodFetchAt = lastFetchAt;
+    // Bean alerts are skipped on this call (no live status yet) and run on the second
+    // one below; status transitions are recorded by then, so they cannot re-fire.
     announce(results);
-    // Machines removed while their requests were in flight must not be re-drawn.
-    render(results.filter(r => machines.some(m => m.serialNo === r.machine.serialNo)));
+    render(stillListed());
     document.getElementById("updated").textContent = "Updated " + new Date().toLocaleTimeString();
+    btn.textContent = "Checking latest issues…";
+
+    // Then each machine's latest reported issue (see LIVE_QUERY), filling in the bean
+    // and fault lines card by card.
+    await Promise.all(results.filter(r => !r.error).map(async (r) => {
+      r.data.live = await fetchLive(r.machine.serialNo);
+      delete r.livePending;
+      replaceCard(r);
+    }));
+    announce(results);
+    render(stillListed());   // picks up the "Out of beans" count
     btn.disabled = false; btn.textContent = "Refresh now";
     refreshing = false;
   }
@@ -1333,6 +1352,7 @@
       detectTransitions: detectTransitions,
       beanState: beanState,
       agoText: agoText,
+      renderBeans: renderBeans,
       faultText: faultText,
       detectBeanAlerts: detectBeanAlerts,
       renameOldDefaults: renameOldDefaults,
